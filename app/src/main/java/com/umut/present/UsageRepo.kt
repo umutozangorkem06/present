@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Process
 import android.provider.Settings
 import java.util.Calendar
+import java.util.concurrent.ConcurrentHashMap
 
 data class AppInfo(val pkg: String, val label: String)
 data class AppUsage(val pkg: String, val label: String, val millis: Long)
@@ -17,9 +18,10 @@ data class DayStats(val total: Long, val apps: List<AppUsage>, val pickups: Int)
 data class DayTotal(val dayStart: Long, val millis: Long)
 
 object UsageRepo {
-    private val labels = HashMap<String, String>()
-    private val eligible = HashMap<String, Boolean>()
-    private var homes: Set<String>? = null
+    // Shared between the blocker service (main thread) and UI coroutines (background).
+    private val labels = ConcurrentHashMap<String, String>()
+    private val eligible = ConcurrentHashMap<String, Boolean>()
+    @Volatile private var homes: Set<String>? = null
 
     fun hasUsageAccess(c: Context): Boolean {
         val ops = c.getSystemService(AppOpsManager::class.java)

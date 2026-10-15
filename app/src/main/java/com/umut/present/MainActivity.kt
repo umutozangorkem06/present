@@ -74,7 +74,7 @@ fun App(resume: Int) {
                 when (t) {
                     0 -> TodayScreen(resume, hasUsage, hasAcc)
                     1 -> FocusScreen(hasAcc) { tab = 2 }
-                    2 -> BlockListScreen(hasAcc, hasUsage)
+                    2 -> BlockListScreen(resume, hasAcc, hasUsage)
                     else -> WeekScreen(resume, hasUsage)
                 }
             }

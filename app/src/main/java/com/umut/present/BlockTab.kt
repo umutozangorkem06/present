@@ -1,7 +1,7 @@
 package com.umut.present
 
+import android.content.Intent
 import android.provider.Settings
-import android.widget.Toast
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -53,12 +53,13 @@ import java.text.SimpleDateFormat
 import java.util.Date
 
 @Composable
-fun BlockListScreen(hasAcc: Boolean, hasUsage: Boolean) {
+fun BlockListScreen(resume: Int, hasAcc: Boolean, hasUsage: Boolean) {
     val c = LocalContext.current
     var version by remember { mutableIntStateOf(0) }
-    var apps by remember { mutableStateOf<List<AppInfo>?>(null) }
-    val initial = remember { Prefs.blocked(c) }
-    var blocked by remember { mutableStateOf(initial) }
+    // Re-read on resume so changes made in the app picker show up.
+    val selected = remember(resume) {
+        Prefs.blocked(c).map { AppInfo(it, UsageRepo.label(c, it)) }.sortedBy { it.label.lowercase(EN) }
+    }
     var schedules by remember { mutableStateOf(Prefs.schedules(c)) }
     var limit by remember { mutableStateOf(Prefs.limitLock(c)) }
     var goal by remember { mutableIntStateOf(Prefs.goalMinutes(c)) }
@@ -68,15 +69,12 @@ fun BlockListScreen(hasAcc: Boolean, hasUsage: Boolean) {
     var status by remember { mutableStateOf<BlockState?>(null) }
     var editing by remember { mutableStateOf<Schedule?>(null) }
     var editLimit by remember { mutableStateOf(false) }
-    var query by rememberSaveable { mutableStateOf("") }
-    val focusActive = remember { Prefs.focusActive(c) }
 
     fun refreshSchedules() {
         schedules = Prefs.schedules(c)
         version++
     }
 
-    LaunchedEffect(Unit) { apps = withContext(Dispatchers.Default) { UsageRepo.launchableApps(c) } }
     LaunchedEffect(version, limit, goal, hasUsage) {
         while (true) {
             status = withContext(Dispatchers.Default) {
@@ -86,11 +84,6 @@ fun BlockListScreen(hasAcc: Boolean, hasUsage: Boolean) {
         }
     }
 
-    val shown = remember(apps, query) {
-        apps.orEmpty()
-            .filter { query.isBlank() || it.label.contains(query.trim(), ignoreCase = true) }
-            .sortedWith(compareByDescending<AppInfo> { it.pkg in initial }.thenBy { it.label.lowercase(EN) })
-    }
     val now = System.currentTimeMillis()
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = screenPadding) {
@@ -107,6 +100,35 @@ fun BlockListScreen(hasAcc: Boolean, hasUsage: Boolean) {
                     Modifier.quietClick { openSettings(c, Settings.ACTION_ACCESSIBILITY_SETTINGS) },
                     style = Type.small.copy(color = Clay),
                 )
+            }
+
+            // Apps
+            Spacer(Modifier.height(40.dp))
+            Row {
+                Label("Apps to block", Modifier.weight(1f))
+                Label("${selected.size} selected", color = if (selected.isEmpty()) Muted else Sage)
+            }
+            Spacer(Modifier.height(12.dp))
+            Hairline()
+        }
+        items(selected, key = { "app:" + it.pkg }) { app ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                AppIcon(app.pkg)
+                Spacer(Modifier.width(14.dp))
+                Text(app.label, Modifier.weight(1f), style = Type.body, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        item {
+            if (selected.isEmpty()) {
+                Text(
+                    "Nothing selected yet. Pick the apps that pull you in.",
+                    Modifier.padding(vertical = 14.dp),
+                    style = Type.small,
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            GhostButton(if (selected.isEmpty()) "Choose apps" else "Edit apps") {
+                c.startActivity(Intent(c, AppPickerActivity::class.java))
             }
 
             // Schedules
@@ -168,38 +190,6 @@ fun BlockListScreen(hasAcc: Boolean, hasUsage: Boolean) {
             Hairline()
             StepperRow("Minutes per open", minutesPerOpen, 1..30) { minutesPerOpen = it; Prefs.setMinutesPerOpen(c, it) }
             Hairline()
-
-            // Apps
-            Spacer(Modifier.height(40.dp))
-            Row {
-                Label("Apps to block", Modifier.weight(1f))
-                Label("${blocked.size} selected", color = if (blocked.isEmpty()) Muted else Sage)
-            }
-            Spacer(Modifier.height(16.dp))
-            SearchField(query) { query = it }
-            Spacer(Modifier.height(8.dp))
-        }
-        if (apps == null) item { Text("Loading…", Modifier.padding(top = 12.dp), style = Type.small) }
-        items(shown, key = { it.pkg }) { app ->
-            val on = app.pkg in blocked
-            Row(
-                Modifier.fillMaxWidth()
-                    .clickable {
-                        if (on && focusActive) {
-                            Toast.makeText(c, "You can't remove apps during a focus session", Toast.LENGTH_SHORT).show()
-                            return@clickable
-                        }
-                        blocked = if (on) blocked - app.pkg else blocked + app.pkg
-                        Prefs.setBlocked(c, blocked)
-                    }
-                    .padding(vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                AppIcon(app.pkg)
-                Spacer(Modifier.width(14.dp))
-                Text(app.label, Modifier.weight(1f), style = Type.body, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Check(on)
-            }
         }
     }
 
@@ -295,28 +285,6 @@ private fun RoundButton(symbol: String, enabled: Boolean, onClick: () -> Unit) {
     ) {
         Text(symbol, style = Type.body.copy(fontSize = 18.sp, color = if (enabled) Ink else Faint))
     }
-}
-
-@Composable
-private fun SearchField(value: String, onChange: (String) -> Unit) {
-    BasicTextField(
-        value = value,
-        onValueChange = onChange,
-        singleLine = true,
-        textStyle = Type.body,
-        cursorBrush = SolidColor(Sage),
-        modifier = Modifier.fillMaxWidth(),
-        decorationBox = { inner ->
-            Column {
-                Box(Modifier.padding(vertical = 6.dp)) {
-                    if (value.isEmpty()) Text("Search", style = Type.body.copy(color = Faint))
-                    inner()
-                }
-                Spacer(Modifier.height(6.dp))
-                Hairline()
-            }
-        },
-    )
 }
 
 // ───────────────────────────── Schedule editor ─────────────────────────────
